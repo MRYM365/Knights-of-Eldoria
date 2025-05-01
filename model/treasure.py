@@ -8,9 +8,9 @@ if TYPE_CHECKING:
 
 
 class TreasureType(Enum):
-    BRONZE = 1
-    SILVER = 2
-    GOLD = 3
+    BRONZE = 1  # 3% value increase
+    SILVER = 2  # 7% value increase
+    GOLD = 3    # 13% value increase
 
 
 class Treasure(Agent):
@@ -22,17 +22,17 @@ class Treasure(Agent):
 
     def decay_value(self):
         """Reduce treasure value by 0.1% each step"""
-        self.value *= 0.999
+        self.value *= 0.999  # 0.1% decay per step
         return self.value > 0.01  # Returns True if treasure still has value
 
     def get_value_increase(self) -> float:
         """Returns the percentage increase a hunter gets for collecting this treasure"""
         if self.type == TreasureType.BRONZE:
-            return 0.03
+            return 0.03  # 3% increase
         elif self.type == TreasureType.SILVER:
-            return 0.07
+            return 0.07  # 7% increase
         elif self.type == TreasureType.GOLD:
-            return 0.13
+            return 0.13  # 13% increase
 
     def __str__(self) -> str:
         return f"{self.type.name} Treasure at {self.get_location()} (Value: {self.value:.2f}%)"

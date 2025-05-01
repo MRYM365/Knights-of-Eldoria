@@ -2,9 +2,8 @@ from controller.simulation_controller import SimulationController
 import tkinter as tk
 from tkinter import scrolledtext
 import sys
+import logging
 from typing import TYPE_CHECKING
-
-# Add this import
 from model.hunter import HunterSkill
 
 if TYPE_CHECKING:
@@ -13,10 +12,25 @@ if TYPE_CHECKING:
     from model.knight import Knight
     from model.treasure import Treasure
 
+class TkinterHandler(logging.Handler):
+    def __init__(self, text_widget):
+        super().__init__()
+        self.text_widget = text_widget
+        
+    def emit(self, record):
+        msg = self.format(record)
+        self.text_widget.configure(state='normal')
+        self.text_widget.insert(tk.END, msg + '\n')
+        self.text_widget.see(tk.END)
+        self.text_widget.configure(state='disabled')
+
 class SimulationApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Eldoria Treasure Hunt")
+
+        # Setup logging first
+        self.setup_logging()
 
         # Create controller with fixed size
         self.controller = SimulationController(size=20)
@@ -24,29 +38,50 @@ class SimulationApp:
         # Setup UI
         self.setup_ui()
 
-        # Initialize simulation
+        # Initialize simulation with specified numbers
         self.controller.initialize_simulation(
             num_hideouts=20,
-            num_hunters=35,
+            num_hunters=35,  # This should create 35 hunters
             num_knights=30,
             num_treasures=80
         )
 
+        # Log initial state
+        logging.info(f"Simulation initialized with:")
+        logging.info(f"- Hideouts: {20}")
+        logging.info(f"- Hunters: {35}")
+        logging.info(f"- Knights: {30}")
+        logging.info(f"- Treasures: {80}")
+
         # Start simulation
         self.run_simulation()
 
+    def setup_logging(self):
+        # Clear any existing handlers
+        root_logger = logging.getLogger()
+        root_logger.handlers = []
+
+        # Configure logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(message)s',
+            datefmt='%H:%M:%S'
+        )
+
     def update_stats_display(self):
         kingdom = self.controller.kingdom
-        wealth = sum(len(h.stored_treasures) for h in kingdom.hideouts)
+        total_wealth = kingdom.total_wealth
+
+        # Log stats every update
+        logging.info(f"Step {kingdom.steps}: Hunters: {len(kingdom.hunters)}, "
+                    f"Knights: {len(kingdom.knights)}, Treasures: {len(kingdom.treasures)}, "
+                    f"Total Wealth: {total_wealth:.1f}")
 
         self.stats_labels['step'].config(text=f"Step: {kingdom.steps}")
         self.stats_labels['hunters'].config(text=f"Hunters: {len(kingdom.hunters)}")
         self.stats_labels['knights'].config(text=f"Knights: {len(kingdom.knights)}")
         self.stats_labels['treasures'].config(text=f"Treasures: {len(kingdom.treasures)}")
-        self.stats_labels['wealth'].config(text=f"Total Wealth: {wealth}")
-
-        # Add more stats if needed
-        # self.stats_labels['active_knights'].config(text=f"Active Knights: {sum(1 for k in kingdom.knights if k.energy > 20)}")
+        self.stats_labels['wealth'].config(text=f"Total Wealth: {total_wealth:.1f}")
 
     def show_agent_details(self, event):
         kingdom = self.controller.kingdom
@@ -79,8 +114,7 @@ class SimulationApp:
         # Canvas for visualization (left side)
         self.canvas = tk.Canvas(main_frame, width=600, height=600, bg='white')
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-
+        self.canvas.bind('<Button-1>', self.show_agent_details)
 
         # Right panel for information display
         right_panel = tk.Frame(main_frame, width=250, padx=10, pady=10)
@@ -122,7 +156,7 @@ class SimulationApp:
             tk.Label(frame, bg=color, width=3, height=1).pack(side=tk.LEFT)
             tk.Label(frame, text=text, anchor='w').pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Agent details and console
+        # Event Log
         details_frame = tk.LabelFrame(right_panel, text="Event Log", padx=5, pady=5)
         details_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
@@ -135,17 +169,19 @@ class SimulationApp:
         )
         self.details_text.pack(fill=tk.BOTH, expand=True)
 
-        # Redirect stdout to console
-        sys.stdout = TextRedirector(self.details_text, "stdout")
+        # Add logging handler for the text widget
+        handler = TkinterHandler(self.details_text)
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', '%H:%M:%S'))
+        logging.getLogger().addHandler(handler)
 
     def run_simulation(self):
         if not self.controller.kingdom.is_simulation_over():
             self.controller.step_simulation()
             self.draw_kingdom()
-            self.update_stats_display()  # Add this line
+            self.update_stats_display()
             self.root.after(500, self.run_simulation)
         else:
-            self.log.insert(tk.END, "\nSIMULATION COMPLETE\n")
+            logging.info("\nSIMULATION COMPLETE\n")
 
     def draw_kingdom(self):
         self.canvas.delete("all")
@@ -281,22 +317,6 @@ class SimulationApp:
             fill="black",
             font=("Arial", 10, "bold")
         )
-
-
-
-class TextRedirector:
-    def __init__(self, widget, tag="stdout"):
-        self.widget = widget
-        self.tag = tag
-
-    def write(self, str):
-        self.widget.configure(state="normal")
-        self.widget.insert(tk.END, str, (self.tag,))
-        self.widget.configure(state="disabled")
-        self.widget.see(tk.END)
-
-    def flush(self):
-        pass
 
 
 if __name__ == "__main__":

@@ -10,6 +10,9 @@ from model.treasure import Treasure, TreasureType
 
 class Kingdom:
     def __init__(self, size: int = 20):
+        """Initialize the kingdom with a grid of at least 20x20 cells"""
+        if size < 20:
+            size = 20  # Minimum size requirement
         self.size = size
         self.grid = [[None for _ in range(size)] for _ in range(size)]
         self.hunters = []
@@ -17,45 +20,60 @@ class Kingdom:
         self.hideouts = []
         self.treasures = []
         self.steps = 0
+        self.total_wealth = 0
 
     def initialize(self, num_hideouts=20, num_hunters=20, num_knights=15, num_treasures=50):
-        # Clear existing agents
+        """Initialize the simulation with agents and treasures"""
+        # Clear the grid and agent lists
         self.grid = [[None for _ in range(self.size)] for _ in range(self.size)]
         self.hideouts = []
         self.hunters = []
         self.knights = []
         self.treasures = []
+        self.total_wealth = 0
 
-        # Place hideouts with hunters
+        # Place hideouts first
         for _ in range(num_hideouts):
-            loc = self.get_random_empty_location()
-            hideout = Hideout(loc)
-            self.grid[loc.get_x()][loc.get_y()] = hideout  # Changed to get_x()/get_y()
-            self.hideouts.append(hideout)
+            while True:
+                loc = Location(random.randint(0, self.size - 1), random.randint(0, self.size - 1))
+                if self.grid[loc.get_x()][loc.get_y()] is None:
+                    hideout = Hideout(loc)
+                    self.grid[loc.get_x()][loc.get_y()] = hideout
+                    self.hideouts.append(hideout)
+                    break
 
-            # Place 1 hunter per hideout initially
-            if len(self.hunters) < num_hunters:
-                skill = random.choice(list(HunterSkill))
-                hunter = Hunter(loc, skill)
-                hideout.add_hunter(hunter)
-                self.hunters.append(hunter)
-
-        # ... rest of initialization code
+        # Place hunters in hideouts
+        hunters_placed = 0
+        while hunters_placed < num_hunters:
+            hideout = random.choice(self.hideouts)
+            hunter = Hunter(hideout.get_location(), random.choice(list(HunterSkill)))
+            hideout.add_hunter(hunter)
+            self.hunters.append(hunter)
+            hunters_placed += 1
+            # Ensure hideout remains in grid
+            self.grid[hideout.get_location().get_x()][hideout.get_location().get_y()] = hideout
+            logging.info(f"Hunter with {hunter.skill.name} skill placed at hideout ({hideout.get_location().get_x()}, {hideout.get_location().get_y()})")
 
         # Place knights
         for _ in range(num_knights):
-            loc = self.get_random_empty_location()
-            knight = Knight(loc)
-            self.grid[loc.get_x()][loc.get_y()] = knight
-            self.knights.append(knight)
+            while True:
+                loc = Location(random.randint(0, self.size - 1), random.randint(0, self.size - 1))
+                if self.grid[loc.get_x()][loc.get_y()] is None:
+                    knight = Knight(loc)
+                    self.grid[loc.get_x()][loc.get_y()] = knight
+                    self.knights.append(knight)
+                    break
 
         # Place treasures
         for _ in range(num_treasures):
-            loc = self.get_random_empty_location()
-            treasure_type = random.choice(list(TreasureType))
-            treasure = Treasure(loc, treasure_type)
-            self.grid[loc.get_x()][loc.get_y()] = treasure
-            self.treasures.append(treasure)
+            while True:
+                loc = Location(random.randint(0, self.size - 1), random.randint(0, self.size - 1))
+                if self.grid[loc.get_x()][loc.get_y()] is None:
+                    treasure_type = random.choice(list(TreasureType))
+                    treasure = Treasure(loc, treasure_type)
+                    self.grid[loc.get_x()][loc.get_y()] = treasure
+                    self.treasures.append(treasure)
+                    break
 
     def get_random_empty_location(self) -> Location:
         """Find a random empty location in the grid"""
@@ -97,18 +115,7 @@ class Kingdom:
 
     def update_hunters(self):
         """Update all hunters, handling deaths, resting, and exploration"""
-        for hunter in self.hunters[:]:
-            if not hunter.update_survival():
-                loc = hunter.location
-                if self.grid[loc.x][loc.y] == hunter:
-                    self.grid[loc.x][loc.y] = None
-                self.hunters.remove(hunter)
-                continue
-            # Iterate over a copy of the list
-            x, y = hunter.get_location().get_x(), hunter.get_location().get_y()
-            logging.info(f"Hunter {hunter.skill.name.lower()} at ({x}, {y}) - "
-                         f"Stamina: {hunter.stamina:.1f}%, "
-                         f"Carrying: {'Yes' if hunter.carrying else 'No'}")
+        for hunter in self.hunters[:]:  # Iterate over a copy of the list
             if not hunter.update_survival():
                 # Handle hunter death
                 loc = hunter.get_location()
@@ -188,83 +195,165 @@ class Kingdom:
 
                 # Update hunter's new position in grid
                 new_x, new_y = next_step.get_x(), next_step.get_y()
-                self.grid[new_x][new_y] = hunter
-
-                logging.info(f"Hunter carrying treasure moving to hideout at ({new_x}, {new_y})")
-
                 cell = self.grid[new_x][new_y]
+                
                 if cell and hasattr(cell, 'hunters'):  # Hideout check
-                    cell.store_treasure(hunter.drop_treasure())
-                    cell.add_hunter(hunter)
-                    logging.info(f"Hunter delivered treasure to hideout at ({new_x}, {new_y})")
-                    # Remove hunter from grid (now inside hideout)
-                    self.grid[new_x][new_y] = cell
-        else:
-            if hunter.known_treasures:
-                target = min(
-                    hunter.known_treasures,
-                    key=lambda loc: self.distance(hunter.get_location(), loc)
-                )
-                next_step = self.find_next_step(hunter.get_location(), target)
-                hunter.move(next_step)
-
-                # Update hunter's new position in grid
-                new_x, new_y = next_step.get_x(), next_step.get_y()
-                self.grid[new_x][new_y] = hunter
-
-                logging.info(f"Hunter moving to treasure at ({new_x}, {new_y})")
-
-                cell = self.grid[new_x][new_y]
-                if cell and hasattr(cell, 'type'):  # Treasure found
-                    hunter.collect_treasure(cell)
-                    self.treasures.remove(cell)  # Remove from global list
-                    self.grid[new_x][new_y] = hunter  # Hunter now occupies this cell
-                    logging.info(f"Hunter collected treasure at ({new_x}, {new_y})")
-                    return  # Important to prevent further moves this turn
+                    # Store treasure in hideout
+                    treasure = hunter.drop_treasure()
+                    cell.store_treasure(treasure)
+                    self.total_wealth += treasure.value  # Update total wealth when treasure is stored
+                    logging.info(f"Hunter delivered {treasure.type.name} treasure to hideout at ({new_x}, {new_y})")
+                else:
+                    self.grid[new_x][new_y] = hunter
             else:
-                adjacent = hunter.get_location().get_adjacent_locations(self.size)
-                valid_moves = [
-                    loc for loc in adjacent
-                    if not (self.grid[loc.get_x()][loc.get_y()] and
-                            hasattr(self.grid[loc.get_x()][loc.get_y()], 'energy'))  # Avoid knights
+                # Move randomly if no known hideouts
+                next_loc = self.get_random_empty_location()
+                hunter.move(next_loc)
+                self.grid[next_loc.get_x()][next_loc.get_y()] = hunter
+        else:
+            # Look for treasure
+            if hunter.known_treasures:
+                # Filter known treasures to only include actual treasures still in the grid
+                valid_treasures = [
+                    loc for loc in hunter.known_treasures
+                    if self.grid[loc.get_x()][loc.get_y()] and hasattr(self.grid[loc.get_x()][loc.get_y()], 'value')
                 ]
-                if valid_moves:
-                    next_step = random.choice(valid_moves)
+                
+                if valid_treasures:
+                    target = max(
+                        valid_treasures,
+                        key=lambda loc: self.grid[loc.get_x()][loc.get_y()].value
+                    )
+                    next_step = self.find_next_step(hunter.get_location(), target)
                     hunter.move(next_step)
 
                     # Update hunter's new position in grid
                     new_x, new_y = next_step.get_x(), next_step.get_y()
-                    self.grid[new_x][new_y] = hunter
+                    cell = self.grid[new_x][new_y]
 
-                    logging.info(f"Hunter exploring to ({new_x}, {new_y})")
+                    if cell and hasattr(cell, 'value'):  # Treasure check
+                        hunter.collect_treasure(cell)
+                        self.treasures.remove(cell)
+                        self.grid[new_x][new_y] = hunter
+                        logging.info(f"Hunter collected {cell.type.name} treasure at ({new_x}, {new_y})")
+                    else:
+                        self.grid[new_x][new_y] = hunter
+                else:
+                    # No valid treasures found, move randomly
+                    next_loc = self.get_random_empty_location()
+                    hunter.move(next_loc)
+                    self.grid[next_loc.get_x()][next_loc.get_y()] = hunter
+            else:
+                # Move randomly if no known treasures
+                next_loc = self.get_random_empty_location()
+                hunter.move(next_loc)
+                self.grid[next_loc.get_x()][next_loc.get_y()] = hunter
 
     def update_knights(self):
         """Update all knights in the kingdom"""
-        for knight in self.knights:
+        for knight in self.knights[:]:  # Iterate over a copy of the list
+            current_loc = knight.get_location()
+            current_x, current_y = current_loc.get_x(), current_loc.get_y()
+
+            # Clear current position if knight is still there
+            if self.grid[current_x][current_y] == knight:
+                self.grid[current_x][current_y] = None
+
             if knight.should_retreat():
-                logging.info(f"Knight retreating to garrison (Energy: {knight.energy:.1f}%)")
                 self.handle_knight_retreat(knight)
             else:
                 self.handle_knight_patrol(knight)
 
+            # Update new position in grid if knight moved
+            new_loc = knight.get_location()
+            if new_loc.get_x() != current_x or new_loc.get_y() != current_y:
+                self.grid[new_loc.get_x()][new_loc.get_y()] = knight
+
+    def handle_knight_retreat(self, knight):
+        """Handle knight retreating to garrison when energy is low"""
+        if knight.garrison_location:
+            next_step = self.find_next_step(knight.get_location(), knight.garrison_location)
+            knight.move(next_step)
+            knight.rest()  # Recover energy while moving to garrison
+        else:
+            # Find nearest hideout as temporary garrison
+            nearest_hideout = min(
+                self.hideouts,
+                key=lambda h: self.distance(knight.get_location(), h.get_location())
+            )
+            knight.garrison_location = nearest_hideout.get_location()
+            next_step = self.find_next_step(knight.get_location(), nearest_hideout.get_location())
+            knight.move(next_step)
+            knight.rest()
+
+    def handle_knight_patrol(self, knight):
+        """Handle knight patrolling and chasing hunters"""
+        # Scan for hunters within 3-cell radius
+        target = knight.scan_for_hunters(self.grid)
+        if target:
+            # If hunter is carrying treasure, increase chase priority
+            if target.carrying:
+                knight.chase(target)
+                next_step = self.find_next_step(knight.get_location(), target.get_location())
+                knight.move(next_step)
+                logging.info(f"Knight at ({knight.get_location().get_x()}, {knight.get_location().get_y()}) chasing {target.skill.name} hunter carrying {target.carrying.type.name} treasure (Energy: {knight.energy:.1f}%)")
+            else:
+                # Regular chase for non-carrying hunters
+                knight.chase(target)
+                next_step = self.find_next_step(knight.get_location(), target.get_location())
+                knight.move(next_step)
+                logging.info(f"Knight at ({knight.get_location().get_x()}, {knight.get_location().get_y()}) patrolling near {target.skill.name} hunter (Energy: {knight.energy:.1f}%)")
+
+            # Check if knight caught up with hunter
+            if knight.get_location().equals(target.get_location()):
+                result = knight.interact_with_hunter(target)
+                if result == "detained":
+                    # Remove hunter from grid and lists
+                    self.hunters.remove(target)
+                    logging.info(f"Knight detained {target.skill.name} hunter at ({target.get_location().get_x()}, {target.get_location().get_y()}) (Hunter Stamina: {target.stamina:.1f}%, Knight Energy: {knight.energy:.1f}%)")
+                elif result == "challenged":
+                    # Hunter drops treasure if carrying
+                    if target.carrying:
+                        treasure = target.drop_treasure()
+                        x, y = target.get_location().get_x(), target.get_location().get_y()
+                        self.grid[x][y] = treasure
+                        self.treasures.append(treasure)
+                        logging.info(f"{target.skill.name} hunter dropped {treasure.type.name} treasure after challenge at ({x}, {y}) (Hunter Stamina: {target.stamina:.1f}%, Knight Energy: {knight.energy:.1f}%)")
+        else:
+            # Random patrol movement
+            adjacent = knight.get_location().get_adjacent_locations(self.size)
+            valid_moves = [loc for loc in adjacent if self.grid[loc.get_x()][loc.get_y()] is None]
+            if valid_moves:
+                next_step = random.choice(valid_moves)
+                knight.move(next_step)
+                logging.info(f"Knight patrolling to ({next_step.get_x()}, {next_step.get_y()}) (Energy: {knight.energy:.1f}%)")
+
     def update_hideouts(self):
+        """Update all hideouts, handling recruitment and information sharing"""
         for hideout in self.hideouts:
-            if not hideout.hunters and not hideout.stored_treasures:
-                loc = hideout.location
-                self.grid[loc.x][loc.y] = None
-                self.hideouts.remove(hideout)
-                continue
-            hideout_x, hideout_y = hideout.get_location().get_x(), hideout.get_location().get_y()
-            logging.info(f"Hideout at ({hideout_x}, {hideout_y}): "
-                         f"{len(hideout.stored_treasures)} treasures, "
-                         f"{len(hideout.hunters)} hunters")
+            # Ensure hideout is in grid
+            x, y = hideout.get_location().get_x(), hideout.get_location().get_y()
+            if self.grid[x][y] != hideout:
+                self.grid[x][y] = hideout
+                
+            # Share information among hunters
+            if len(hideout.hunters) > 1:
+                hunter_skills = [h.skill.name for h in hideout.hunters]
+                logging.info(f"Hideout at ({x}, {y}) sharing information among {len(hideout.hunters)} hunters with skills: {', '.join(hunter_skills)}")
             hideout.share_information()
+
+            # Try to recruit new hunter
             new_skill = hideout.try_recruit()
             if new_skill:
                 new_hunter = Hunter(hideout.get_location(), new_skill)
                 hideout.add_hunter(new_hunter)
                 self.hunters.append(new_hunter)
-                logging.info(f"New {new_skill.name.lower()} hunter recruited at hideout ({hideout.get_location().get_x()}, {hideout.get_location().get_y()})")
+                # Ensure hideout remains in grid after recruitment
+                self.grid[x][y] = hideout
+                logging.info(f"New {new_skill.name} hunter recruited at hideout ({x}, {y}) - Total hunters in hideout: {len(hideout.hunters)}")
+
+            # Update grid to reflect current hideout state
+            self.grid[x][y] = hideout
 
     def is_simulation_over(self) -> bool:
         """Check if simulation should end"""
@@ -275,201 +364,29 @@ class Kingdom:
                 f"Hunters: {len(self.hunters)}, Knights: {len(self.knights)}, "
                 f"Hideouts: {len(self.hideouts)}, Treasures: {len(self.treasures)}")
 
-    def handle_hunter_resting(self, hunter):
-        """Handle hunter resting behavior"""
-        # Find nearest hideout
-        nearest_hideout = min(
-            self.hideouts,
-            key=lambda h: self.distance(hunter.get_location(), h.get_location())
-        )
-
-        # Move toward hideout if not already there
-        if not hunter.get_location().equals(nearest_hideout.get_location()):
-            next_step = self.find_next_step(hunter.get_location(), nearest_hideout.get_location())
-            hunter.move(next_step)
-        else:
-            # Rest in hideout
-            nearest_hideout.add_hunter(hunter)
-            hunter.rest()
-            nearest_hideout.share_information()
-
-    def handle_hunter_exploring(self, hunter):
-        """Handle hunter exploring behavior with proper grid position updates"""
-        current_loc = hunter.get_location()
-        current_x, current_y = current_loc.get_x(), current_loc.get_y()
-
-        # Clear current position (only if hunter is still there)
-        if self.grid[current_x][current_y] == hunter:
-            self.grid[current_x][current_y] = None
-
-        # Scan area first
-        hunter.scan_area(self.grid)
-
-        # If carrying treasure, go to nearest hideout
-        if hunter.carrying:
-            if hunter.known_hideouts:
-                target = min(
-                    hunter.known_hideouts,
-                    key=lambda loc: self.distance(hunter.get_location(), loc)
-                )
-                next_step = self.find_next_step(hunter.get_location(), target)
-                hunter.move(next_step)
-
-                # Update hunter's position in grid
-                new_x, new_y = next_step.get_x(), next_step.get_y()
-                self.grid[new_x][new_y] = hunter
-
-                # Check if reached hideout
-                cell = self.grid[new_x][new_y]
-                if cell and hasattr(cell, 'hunters'):  # Hideout check
-                    cell.store_treasure(hunter.drop_treasure())
-                    cell.add_hunter(hunter)
-                    # Remove hunter from grid (now inside hideout)
-                    self.grid[new_x][new_y] = cell
-        else:
-            # Find nearest known treasure
-            if hunter.known_treasures:
-                target = min(
-                    hunter.known_treasures,
-                    key=lambda loc: self.distance(hunter.get_location(), loc)
-                )
-                next_step = self.find_next_step(hunter.get_location(), target)
-                hunter.move(next_step)
-
-                # Update hunter's position in grid
-                new_x, new_y = next_step.get_x(), next_step.get_y()
-                self.grid[new_x][new_y] = hunter
-
-                # Check if reached treasure
-                cell = self.grid[new_x][new_y]
-                if cell and hasattr(cell, 'type'):  # Treasure check
-                    hunter.collect_treasure(cell)
-                    self.treasures.remove(cell)  # Remove from treasures list
-                    self.grid[new_x][new_y] = hunter
-                    logging.info(f"Hunter collected {cell.type.name} treasure at ({new_x}, {new_y})")
-            else:
-                # Random exploration
-                adjacent = hunter.get_location().get_adjacent_locations(self.size)
-                valid_moves = [
-                    loc for loc in adjacent
-                    if not (self.grid[loc.get_x()][loc.get_y()] and
-                            hasattr(self.grid[loc.get_x()][loc.get_y()], 'energy'))  # Avoid knights
-                ]
-                if valid_moves:
-                    next_step = random.choice(valid_moves)
-                    hunter.move(next_step)
-                    # Update hunter's position in grid
-                    new_x, new_y = next_step.get_x(), next_step.get_y()
-                    self.grid[new_x][new_y] = hunter
-
-    def handle_knight_retreat(self, knight):
-        """Handle knight retreat behavior with proper energy management"""
-        current_loc = knight.get_location()
-        current_x, current_y = current_loc.get_x(), current_loc.get_y()
-
-        # Clear current position if knight is still there
-        if self.grid[current_x][current_y] == knight:
-            self.grid[current_x][current_y] = None
-
-        # Find nearest hideout (garrison)
-        if self.hideouts:
-            nearest_garrison = min(
-                self.hideouts,
-                key=lambda h: self.distance(knight.get_location(), h.get_location())
-            )
-
-            # If not at garrison, move toward it
-            if not knight.get_location().equals(nearest_garrison.get_location()):
-                next_step = self.find_next_step(knight.get_location(), nearest_garrison.get_location())
-                knight.move(next_step)
-                self.grid[next_step.get_x()][next_step.get_y()] = knight
-            else:
-                # Rest in garrison and recover energy
-                knight.rest()
-                if knight.energy >= 100:  # Fully recovered
-                    knight.target = None
-        else:
-            # No hideouts - just rest in place
-            knight.rest()
-
-    def handle_knight_patrol(self, knight):
-        """Handle knight patrol behavior with proper logging and position tracking"""
-        current_loc = knight.get_location()
-        current_x, current_y = current_loc.get_x(), current_loc.get_y()
-
-        # Clear current position if knight is still there
-        if self.grid[current_x][current_y] == knight:
-            self.grid[current_x][current_y] = None
-
-        # Check for hunters in 3-cell radius
-        hunter_locations = []
-        for dx in range(-3, 4):
-            for dy in range(-3, 4):
-                if dx == 0 and dy == 0:
-                    continue
-                x = (current_x + dx) % self.size
-                y = (current_y + dy) % self.size
-                cell = self.grid[x][y]
-                if cell and hasattr(cell, 'skill'):  # Hunter check
-                    hunter_locations.append(Location(x, y))
-                    logging.info(f"Knight spotted hunter at ({x}, {y})")
-
-        if hunter_locations:
-            # Chase nearest hunter
-            target = min(
-                hunter_locations,
-                key=lambda loc: self.distance(knight.get_location(), loc)
-            )
-            knight.chase(target)
-            next_step = self.find_next_step(knight.get_location(), target)
-            logging.info(f"Knight chasing hunter from ({current_x}, {current_y}) "
-                         f"to ({next_step.get_x()}, {next_step.get_y()}) "
-                         f"(Energy: {knight.energy:.1f}%)")
-            knight.move(next_step)
-            new_x, new_y = next_step.get_x(), next_step.get_y()
-            self.grid[new_x][new_y] = knight
-
-            # Check if caught hunter
-            cell = self.grid[new_x][new_y]
-            if cell and hasattr(cell, 'skill'):  # Hunter check
-                detained = knight.interact_with_hunter(cell)
-                logging.info(f"Knight {'detained' if detained else 'challenged'} "
-                             f"hunter at ({new_x}, {new_y})")
-                if cell.carrying:
-                    dropped = cell.drop_treasure()
-                    logging.info(f"Hunter dropped {dropped.type.name} treasure at ({new_x}, {new_y})")
-        else:
-            # Random patrol
-            adjacent = knight.get_location().get_adjacent_locations(self.size)
-            if adjacent:
-                next_step = random.choice(adjacent)
-                logging.info(f"Knight patrolling from ({current_x}, {current_y}) "
-                             f"to ({next_step.get_x()}, {next_step.get_y()}) "
-                             f"(Energy: {knight.energy:.1f}%)")
-                knight.move(next_step)
-                new_x, new_y = next_step.get_x(), next_step.get_y()
-                self.grid[new_x][new_y] = knight
-
     def distance(self, loc1: Location, loc2: Location) -> float:
-        """Calculate wrapped distance between two locations"""
+        """Calculate Manhattan distance between two locations, accounting for grid wrapping"""
         dx = min(abs(loc1.get_x() - loc2.get_x()), self.size - abs(loc1.get_x() - loc2.get_x()))
         dy = min(abs(loc1.get_y() - loc2.get_y()), self.size - abs(loc1.get_y() - loc2.get_y()))
-        return (dx ** 2 + dy ** 2) ** 0.5  # Euclidean distance
+        return dx + dy
 
     def find_next_step(self, current: Location, target: Location) -> Location:
-        """Find next step toward target location"""
-        dx = (target.get_x() - current.get_x() + self.size) % self.size
-        dy = (target.get_y() - current.get_y() + self.size) % self.size
+        """Find the next step towards the target, accounting for grid wrapping"""
+        dx = target.get_x() - current.get_x()
+        dy = target.get_y() - current.get_y()
 
-        # Prefer cardinal directions
-        if dx > self.size / 2:
-            dx -= self.size
-        if dy > self.size / 2:
-            dy -= self.size
+        # Handle wrapping
+        if abs(dx) > self.size / 2:
+            dx = -dx if dx > 0 else -dx
+        if abs(dy) > self.size / 2:
+            dy = -dy if dy > 0 else -dy
 
+        # Choose direction with larger difference
         if abs(dx) > abs(dy):
-            x = current.get_x() + (1 if dx > 0 else -1)
-            return Location(x % self.size, current.get_y())
+            new_x = (current.get_x() + (1 if dx > 0 else -1)) % self.size
+            new_y = current.get_y()
         else:
-            y = current.get_y() + (1 if dy > 0 else -1)
-            return Location(current.get_x(), y % self.size)
+            new_x = current.get_x()
+            new_y = (current.get_y() + (1 if dy > 0 else -1)) % self.size
+
+        return Location(new_x, new_y)
